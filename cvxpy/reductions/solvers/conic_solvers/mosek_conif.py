@@ -119,6 +119,7 @@ class MOSEK(ConicSolver):
     """
 
     MIP_CAPABLE = True
+    BATCH_CAPABLE = True
     SUPPORTED_CONSTRAINTS = ConicSolver.SUPPORTED_CONSTRAINTS + [SOC, PSD]
     EXP_CONE_ORDER = [2, 1, 0]
     DUAL_EXP_CONE_ORDER = [0, 1, 2]
@@ -311,6 +312,99 @@ class MOSEK(ConicSolver):
             task.solutionsummary(mosek.streamtype.msg)
 
         return {'task': task, 'solver_options': solver_opts}
+
+    def solve_batch_via_data(
+        self,
+        batch_data: list,
+        warm_start: bool,
+        verbose: bool,
+        solver_opts,
+        solver_cache=None
+    ):
+        """Solve a batch of problems with the same structure but different data.
+
+        Parameters
+        ----------
+        batch_data : list of dict
+            List of data dicts, each generated via an apply call.
+        warm_start : bool
+            Not used for batch solving.
+        verbose : bool
+            Control the verbosity.
+        solver_opts : dict
+            MOSEK-specific solver options. Includes 'num_threads' for parallelism.
+
+        Returns
+        -------
+        list
+            List of dicts containing task and solver_options for each problem.
+        """
+        import mosek
+
+        if not batch_data:
+            return []
+
+        # Extract batch-specific options
+        # num_threads: total thread pool size for batch solving
+        # threads_per_task: threads allocated to each individual task
+        num_threads = solver_opts.pop('num_threads', 4) if solver_opts else 4
+        threads_per_task = solver_opts.pop('threads_per_task', 1) if solver_opts else 1
+
+        results = []
+        tasks = []
+        env = mosek.Env()
+
+        for data in batch_data:
+            # Handle degenerate cases
+            if 'dualized' in data:
+                if len(data[s.C]) == 0 and len(data.get('c_bar_data', [])) == 0:
+                    if np.linalg.norm(data[s.B]) > 0:
+                        sol = Solution(s.INFEASIBLE, -np.inf, None, None, dict())
+                    else:
+                        sol = Solution(s.OPTIMAL, 0.0, dict(), {s.EQ_DUAL: data[s.B]}, dict())
+                    results.append({'sol': sol})
+                    tasks.append(None)
+                    continue
+                else:
+                    task = mosek.Task(env)
+                    processed_opts = MOSEK.handle_options(task, verbose, solver_opts.copy())
+                    task = MOSEK._build_dualized_task(task, data)
+            else:
+                if len(data[s.C]) == 0:
+                    sol = Solution(s.OPTIMAL, 0.0, dict(), dict(), dict())
+                    results.append({'sol': sol})
+                    tasks.append(None)
+                    continue
+                else:
+                    task = mosek.Task(env)
+                    processed_opts = MOSEK.handle_options(task, verbose, solver_opts.copy())
+                    task = MOSEK._build_slack_task(task, data)
+
+            # Set threads per task (default 1 for batch efficiency)
+            task.putintparam(mosek.iparam.num_threads, threads_per_task)
+            tasks.append(task)
+            results.append(None)  # placeholder
+
+        # Filter out None tasks (degenerate cases)
+        valid_tasks = [t for t in tasks if t is not None]
+        valid_indices = [i for i, t in enumerate(tasks) if t is not None]
+
+        if valid_tasks:
+            # Batch optimize all valid tasks
+            env.optimizebatch(
+                False,        # israce: don't stop when first finishes
+                -1.0,         # maxtime: no time limit
+                num_threads,  # threadpoolsize
+                valid_tasks   # tasks
+            )
+
+            # Store results for valid tasks
+            for idx, task in zip(valid_indices, valid_tasks):
+                if verbose:
+                    task.solutionsummary(mosek.streamtype.msg)
+                results[idx] = {'task': task, 'solver_options': processed_opts}
+
+        return results
 
     @staticmethod
     def _build_dualized_task(task, data):
