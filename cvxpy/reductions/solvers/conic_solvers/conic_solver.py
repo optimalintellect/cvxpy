@@ -110,6 +110,11 @@ class ConicSolver(Solver):
     # For such solvers, REQUIRES_CONSTR should be set to True.
     REQUIRES_CONSTR = False
 
+    # Some solvers support batch solving (solving multiple problems with
+    # the same structure but different parameter values in parallel).
+    # For such solvers, BATCH_CAPABLE should be set to True.
+    BATCH_CAPABLE = False
+
     # If a solver supports exponential cones, it must specify the corresponding order
     # The cvxpy standard for the exponential cone is:
     #     K_e = closure{(x,y,z) |  z >= y * exp(x/y), y>0}.
@@ -120,6 +125,14 @@ class ConicSolver(Solver):
         """By default does not support a quadratic objective.
         """
         return False
+
+    def supports_batch(self) -> bool:
+        """Returns True if the solver supports batch solving.
+
+        Batch solving allows solving multiple problems with the same
+        structure but different parameter values efficiently.
+        """
+        return self.BATCH_CAPABLE
 
     def accepts(self, problem):
         return (isinstance(problem, ParamConeProg)

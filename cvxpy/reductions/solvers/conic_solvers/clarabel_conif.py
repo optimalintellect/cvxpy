@@ -139,6 +139,7 @@ class CLARABEL(ConicSolver):
 
     # Solver capabilities.
     MIP_CAPABLE = False
+    BATCH_CAPABLE = True
     SUPPORTED_CONSTRAINTS = ConicSolver.SUPPORTED_CONSTRAINTS \
         + [SOC, ExpCone, PowCone3D, PSD, PowConeND]
     
@@ -386,7 +387,89 @@ class CLARABEL(ConicSolver):
             solver_cache[self.name()] = solver
 
         return results
-    
+
+    def solve_batch_via_data(
+        self,
+        batch_data: list,
+        warm_start: bool,
+        verbose: bool,
+        solver_opts,
+        solver_cache=None
+    ):
+        """Solve a batch of problems with the same structure but different data.
+
+        Parameters
+        ----------
+        batch_data : list of dict
+            List of data dicts, each generated via an apply call.
+            All problems must have the same sparsity pattern.
+        warm_start : bool
+            Not used for batch solving.
+        verbose : bool
+            Control the verbosity.
+        solver_opts : dict
+            Clarabel-specific solver options. Includes 'num_threads' for parallelism.
+
+        Returns
+        -------
+        list
+            List of results from clarabel.solve() for each problem.
+        """
+        import clarabel
+
+        if not batch_data:
+            return []
+
+        # Get dimensions and patterns from first problem
+        first = batch_data[0]
+        A_pattern = first[s.A]
+        q_first = first[s.C]
+        n = q_first.size
+        m = A_pattern.shape[0]
+
+        if s.P in first:
+            P_pattern = sp.triu(first[s.P]).tocsc()
+        else:
+            P_pattern = sp.csc_array((n, n))
+
+        cones = dims_to_solver_cones(first[ConicSolver.DIMS])
+
+        # Extract batch-specific options before parsing solver settings
+        num_threads = solver_opts.pop('num_threads', 1) if solver_opts else 1
+
+        # Parse settings
+        settings = self.parse_solver_opts(verbose, solver_opts if solver_opts else {})
+
+        # Create batch solver
+        batch_solver = clarabel.BatchSolver(
+            n, m, P_pattern, A_pattern, cones, settings, num_threads
+        )
+
+        # Build batch problems
+        batch_problems = []
+        for data in batch_data:
+            A = data[s.A]
+            b = data[s.B]
+            q = data[s.C]
+
+            if s.P in data:
+                P = sp.triu(data[s.P]).tocsc()
+                P_values = P.data
+            else:
+                P_values = []
+
+            batch_problems.append(clarabel.BatchProblem(
+                P_values=P_values,
+                q=q,
+                A_values=A.data,
+                b=b
+            ))
+
+        # Solve all problems
+        results = batch_solver.solve_batch_parallel(batch_problems)
+
+        return results
+
     def cite(self, data):
         """Returns bibtex citation for the solver.
 

@@ -609,6 +609,210 @@ class Problem(u.Canonical):
             return self._solve_solver_path(solve_func,solver_path, args, kwargs)
         return solve_func(self, *args, **kwargs)
 
+    def solve_batch(
+        self,
+        param_values: Dict,
+        solver: str = None,
+        verbose: bool = False,
+        gp: bool = False,
+        enforce_dpp: bool = False,
+        ignore_dpp: bool = False,
+        canon_backend: str | None = None,
+        **kwargs
+    ) -> List:
+        """Solve multiple instances of this problem with different parameter values.
+
+        This method solves a batch of problems that share the same structure but
+        have different parameter values. It requires the solver to support batch
+        solving (e.g., CLARABEL with batch support).
+
+        Arguments
+        ---------
+        param_values : dict
+            A dictionary mapping Parameter objects to their batch values.
+            Values can be:
+            - A list of values (one per batch item)
+            - A numpy array with batch dimension as the first axis
+              (shape = (batch_size,) + param.shape)
+            All parameters must have the same batch size.
+        solver : str, optional
+            The solver to use. Must support batch solving.
+        verbose : bool, optional
+            Overrides the default of hiding solver output.
+        gp : bool, optional
+            If True, parses the problem as a disciplined geometric program.
+        enforce_dpp : bool, optional
+            When True, a DPPError will be thrown when trying to solve a non-DPP
+            problem. Defaults to False.
+        ignore_dpp : bool, optional
+            When True, DPP problems will be treated as non-DPP. Defaults to False.
+        canon_backend : str, optional
+            Specifies which backend to use for canonicalization.
+        kwargs : dict, optional
+            Additional solver-specific options (e.g., num_threads for parallelism).
+
+        Returns
+        -------
+        list
+            A list of Solution objects, one for each batch item.
+
+        Raises
+        ------
+        ValueError
+            If the solver does not support batch solving.
+        cvxpy.error.DPPError
+            If the problem is not DPP compliant.
+
+        Examples
+        --------
+        >>> import cvxpy as cp
+        >>> import numpy as np
+        >>> x = cp.Variable(2)
+        >>> x0 = cp.Parameter(2)
+        >>> prob = cp.Problem(cp.Minimize(cp.sum_squares(x - x0)))
+        >>> initial_states = np.random.randn(100, 2)  # 100 different x0 values
+        >>> solutions = prob.solve_batch({x0: initial_states}, solver=cp.CLARABEL)
+        """
+        from cvxpy.reductions.solution import Solution
+
+        # Validate DPP compliance
+        dpp_context = 'dgp' if gp else 'dcp'
+        if not self.is_dpp(dpp_context):
+            if enforce_dpp:
+                raise error.DPPError(
+                    "Problem is not DPP. Batch solving requires DPP compliance."
+                )
+            else:
+                warnings.warn(
+                    "Problem is not DPP. Batch solving may be slow or fail."
+                )
+
+        # Get problem data and solving chain (this caches the param_prog)
+        data, solving_chain, inverse_data = self.get_problem_data(
+            solver, gp, enforce_dpp, ignore_dpp, verbose, canon_backend, kwargs
+        )
+
+        # Check that solver supports batch solving
+        solver_instance = solving_chain.solver
+        if not solver_instance.supports_batch():
+            raise ValueError(
+                f"Solver {solver_instance.name()} does not support batch solving. "
+                f"Use a batch-capable solver like CLARABEL."
+            )
+
+        # Normalize param_values and determine batch size
+        batch_size, normalized_values = self._normalize_batch_params(param_values)
+
+        if batch_size == 0:
+            return []
+
+        # Get the cached param_prog
+        param_prog = self._cache.param_prog
+        if param_prog is None:
+            raise error.SolverError(
+                "Failed to cache parametrized program. "
+                "Ensure the problem is DPP compliant."
+            )
+
+        # Store original parameter values to restore later
+        original_values = {p: p.value for p in param_values.keys()}
+
+        # Build batch data by applying parameters for each batch item
+        batch_data = []
+        try:
+            for i in range(batch_size):
+                # Set parameter values for this batch item
+                for param, values in normalized_values.items():
+                    param.value = values[i]
+
+                # Apply parameters to get problem data for this batch item
+                item_data, _ = solving_chain.solver.apply(param_prog)
+                batch_data.append(item_data)
+        finally:
+            # Restore original parameter values
+            for param, value in original_values.items():
+                param.value = value
+
+        # Solve batch using solver's batch interface
+        solver_verbose = kwargs.get('solver_verbose', verbose)
+        solver_opts = {k: v for k, v in kwargs.items() if k != 'solver_verbose'}
+        results = solver_instance.solve_batch_via_data(
+            batch_data,
+            warm_start=False,
+            verbose=solver_verbose,
+            solver_opts=solver_opts,
+        )
+
+        # Unpack results into Solution objects
+        solutions = []
+        for i, result in enumerate(results):
+            # Use the solver's invert method to convert result to Solution
+            solution = solver_instance.invert(result, inverse_data[-1])
+            solutions.append(solution)
+
+        return solutions
+
+    def _normalize_batch_params(self, param_values: Dict):
+        """Normalize batch parameter values and determine batch size.
+
+        Parameters can be specified as:
+        - List of values
+        - NumPy array with batch as first dimension
+        - Sparse matrices as a list
+
+        Returns
+        -------
+        tuple
+            (batch_size, normalized_values_dict)
+        """
+        import scipy.sparse as sp
+
+        normalized = {}
+        batch_size = None
+
+        for param, values in param_values.items():
+            if isinstance(values, list):
+                # List of values (works for dense and sparse)
+                normalized[param] = values
+                size = len(values)
+            elif sp.issparse(values):
+                # Single sparse matrix - batch size 1
+                normalized[param] = [values]
+                size = 1
+            elif isinstance(values, np.ndarray):
+                # NumPy array - check dimensions
+                expected_ndim = len(param.shape) if param.shape != () else 0
+                if values.ndim == expected_ndim:
+                    # Single value - batch size 1
+                    normalized[param] = [values]
+                    size = 1
+                elif values.ndim == expected_ndim + 1:
+                    # Batched values - first dim is batch
+                    normalized[param] = [values[i] for i in range(values.shape[0])]
+                    size = values.shape[0]
+                else:
+                    raise ValueError(
+                        f"Parameter {param.name()} has shape {param.shape}, "
+                        f"but got values with shape {values.shape}. "
+                        f"Expected shape ({batch_size},) + {param.shape} for batched values."
+                    )
+            else:
+                raise ValueError(
+                    f"Unsupported type for parameter values: {type(values)}. "
+                    f"Use list, numpy array, or scipy sparse matrix."
+                )
+
+            # Check batch size consistency
+            if batch_size is None:
+                batch_size = size
+            elif size != batch_size:
+                raise ValueError(
+                    f"Inconsistent batch sizes: got {size} for parameter "
+                    f"{param.name()}, but expected {batch_size}."
+                )
+
+        return batch_size or 0, normalized
+
     @classmethod
     def register_solve(cls, name: str, func) -> None:
         """Adds a solve method to the Problem class.
