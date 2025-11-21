@@ -66,6 +66,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+
       - name: Install
         run: |
           source continuous_integration/install_dependencies.sh

@@ -17,7 +17,9 @@ fi
 
 uv pip install pytest pytest-cov hypothesis "setuptools>65.5.1"
 
-uv pip install scs clarabel osqp
+uv pip install scs osqp
+# Install batch-enabled clarabel from git (requires Rust toolchain)
+uv pip install "clarabel @ git+https://github.com/optimalintellect/Clarabel.rs.git"
 
 if [[ "$RUNNER_OS" != "macOS" ]]; then
   uv pip install mkl
