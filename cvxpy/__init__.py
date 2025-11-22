@@ -79,6 +79,7 @@ from cvxpy.settings import (
     GUROBI as GUROBI,
     INFEASIBLE as INFEASIBLE,
     INFEASIBLE_INACCURATE as INFEASIBLE_INACCURATE,
+    MOREAU as MOREAU,
     MOSEK as MOSEK,
     MPAX as MPAX,
     NAG as NAG,

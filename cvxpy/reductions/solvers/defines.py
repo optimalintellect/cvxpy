@@ -37,6 +37,7 @@ from cvxpy.reductions.solvers.conic_solvers.glpk_mi_conif import GLPK_MI as GLPK
 from cvxpy.reductions.solvers.conic_solvers.gurobi_conif import GUROBI as GUROBI_con
 from cvxpy.reductions.solvers.conic_solvers.highs_conif import HIGHS as HIGHS_con
 from cvxpy.reductions.solvers.conic_solvers.knitro_conif import KNITRO as KNITRO_con
+from cvxpy.reductions.solvers.conic_solvers.moreau_conif import MOREAU as MOREAU_con
 from cvxpy.reductions.solvers.conic_solvers.mosek_conif import MOSEK as MOSEK_con
 from cvxpy.reductions.solvers.conic_solvers.nag_conif import NAG as NAG_con
 from cvxpy.reductions.solvers.conic_solvers.pdlp_conif import PDLP as PDLP_con
@@ -65,7 +66,7 @@ from cvxpy.utilities.versioning import Version
 solver_conic_intf = [DIFFCP_con(), ECOS_con(),
                      CVXOPT_con(), GLPK_con(), COPT_con(),
                      GLPK_MI_con(), CBC_con(), CLARABEL_con(), COSMO_con(), SCS_con(), SDPA_con(),
-                     GUROBI_con(), MOSEK_con(), CPLEX_con(), NAG_con(), XPRESS_con(),
+                     GUROBI_con(), MOREAU_con(), MOSEK_con(), CPLEX_con(), NAG_con(), XPRESS_con(),
                      SCIP_con(), SCIPY_con(), HIGHS_con(), GLOP_con(), PDLP_con(),
                      QOCO_con(), CUCLARABEL_con(), CUOPT_con(), ECOS_BB_con(),
                      KNITRO_con()]
@@ -90,7 +91,7 @@ SOLVER_MAP_QP = {solver.name(): solver for solver in solver_qp_intf}
 # CONIC_SOLVERS and QP_SOLVERS are sorted in order of decreasing solver
 # preference. QP_SOLVERS are those for which we have written interfaces
 # and are supported by QpSolver.
-CONIC_SOLVERS = [s.MOSEK, s.CLARABEL, s.SCS, s.ECOS, s.SDPA,
+CONIC_SOLVERS = [s.MOSEK, s.MOREAU, s.CLARABEL, s.SCS, s.ECOS, s.SDPA,
                  s.CPLEX, s.GUROBI, s.COPT, s.GLPK, s.NAG,
                  s.GLPK_MI, s.CBC, s.CVXOPT, s.XPRESS, s.DIFFCP,
                  s.SCIP, s.SCIPY, s.HIGHS, s.GLOP, s.PDLP, s.QOCO,
