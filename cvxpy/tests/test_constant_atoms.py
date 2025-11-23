@@ -30,7 +30,7 @@ from cvxpy.expressions.constants import Constant, Parameter
 from cvxpy.expressions.variable import Variable
 from cvxpy.problems.problem import Problem
 from cvxpy.reductions.solvers.defines import INSTALLED_SOLVERS
-from cvxpy.settings import CLARABEL, CVXOPT, MOSEK, OSQP, ROBUST_KKTSOLVER, SCS
+from cvxpy.settings import CLARABEL, CVXOPT, MOSEK, OSQP, ROBUST_KKTSOLVER, SCS, MOREAU
 
 ROBUST_CVXOPT = "robust_cvxopt"
 SOLVER_TO_TOL = {SCS: 1e-2,
@@ -47,6 +47,10 @@ if CVXOPT in INSTALLED_SOLVERS:
 if MOSEK in INSTALLED_SOLVERS:
     SOLVERS_TO_TRY.append(MOSEK)
     SOLVER_TO_TOL[MOSEK] = 1e-6
+
+if MOREAU in INSTALLED_SOLVERS:
+    SOLVERS_TO_TRY.append(MOREAU)
+    SOLVER_TO_TOL[MOREAU] = 1e-6
 
 v_np = np.array([-1., 2, -2]).T
 

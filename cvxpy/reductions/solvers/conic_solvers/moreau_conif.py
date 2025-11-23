@@ -441,17 +441,33 @@ class MOREAU(ConicSolver):
                 self.solve_time = solve_time
                 self.obj_val = obj_val
 
+        # Handle batch_size=1 case where results may be scalar/1D instead of 2D
+        # Ensure all result arrays are properly shaped for indexing
+        if batch_size == 1:
+            # For batch_size=1, wrap scalars/1D arrays to be indexable
+            result_x = result['x'].reshape(1, -1) if result['x'].ndim == 1 else result['x']
+            result_s = result['s'].reshape(1, -1) if result['s'].ndim == 1 else result['s']
+            result_z = result['z'].reshape(1, -1) if result['z'].ndim == 1 else result['z']
+            result_status = np.atleast_1d(result['status'])
+            result_obj_val = np.atleast_1d(result['obj_val'])
+        else:
+            result_x = result['x']
+            result_s = result['s']
+            result_z = result['z']
+            result_status = result['status']
+            result_obj_val = result['obj_val']
+
         results = []
         for i in range(batch_size):
-            status_val = moreau.SolverStatus(int(result['status'][i]))
+            status_val = moreau.SolverStatus(int(result_status[i]))
             sol = MoreauSolution(
-                x=result['x'][i],
-                s=result['s'][i],
-                z=result['z'][i],
+                x=result_x[i],
+                s=result_s[i],
+                z=result_z[i],
                 status=status_val.name,
                 iterations=result['iterations'],
                 solve_time=result['solve_time'] / batch_size,  # Approximate per-problem time
-                obj_val=result['obj_val'][i] if isinstance(result['obj_val'], (list, np.ndarray)) else result['obj_val']
+                obj_val=result_obj_val[i] if isinstance(result_obj_val, (list, np.ndarray)) else result_obj_val
             )
             results.append(sol)
 
